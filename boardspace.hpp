@@ -1,5 +1,6 @@
 
 #include <cstdint>
+#include <unordered_map>
 
 enum struct ShipOrientation {
     Vertical,
@@ -32,4 +33,20 @@ struct BoardSpace {
         }
         return ' ';
     }
+};
+
+struct SpaceStats {
+public:
+    SpaceStats() : empty_count(0), fired_at_count(0), 
+                   miss_count(0), hit_count(0), games_played(0) 
+    {
+        
+    }
+
+    std::unordered_map<uint32_t, uint32_t> ship_id_count;
+    uint32_t empty_count;
+    uint32_t fired_at_count;
+    uint32_t miss_count;
+    uint32_t hit_count;
+    uint32_t games_played;
 };

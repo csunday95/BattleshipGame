@@ -1,21 +1,46 @@
 #include "game.hpp"
 #include <sstream>
 
-Game::Game(uint32_t board_rows, uint32_t board_cols)
+Game::Game(uint32_t board_rows, uint32_t board_cols, bool compute_stats)
     : board_rows(board_rows), board_cols(board_cols), shots_taken(0), 
-    hits_scored(0), total_ship_spaces(0)
+    hits_scored(0), total_ship_spaces(0), compute_stats(compute_stats),
+    first_game(true), board(nullptr), stats_board(nullptr), last_match_board(nullptr)
 {
     board_size = board_rows * board_cols;
     board = new BoardSpace[board_size];
+    if(compute_stats)
+    {
+        stats_board = new SpaceStats[board_size];
+    }
     resetGame();
 }
 
 Game::~Game() 
 {
-    delete[] board;
+    if(board)
+    {
+        delete[] board;
+    }
+    for(auto pBoard : session_boards)
+    {
+        delete[] pBoard;
+    }
+    if(stats_board)
+    {
+        delete[] stats_board;
+    }
 }
 
 void Game::resetGame() {
+    if(first_game)
+    {
+        first_game = false;
+    }
+    else if(compute_stats)
+    {
+        session_boards.push_back(board);
+        board = new BoardSpace[board_size];
+    }
     for(int idx = 0; idx < board_size; idx++)
     {
         board[idx].ship_id = 0;
@@ -54,6 +79,7 @@ bool Game::fireAt(uint32_t x_target, uint32_t y_target, uint32_t& hit_id)
         return false;
     }
     shots_taken++;
+    space.is_shot = true;
     if(space.ship_id)
     {
         hits_scored++;
@@ -84,6 +110,10 @@ bool Game::placeShip(uint32_t ship_id, uint32_t length, ShipOrientation orientat
     uint32_t test_x = base_x, test_y = base_y;
     for(int idx = 0; idx < length; idx++)
     {
+        if(test_x >= board_cols || test_y >= board_rows)
+        {
+            return false;
+        }
         BoardSpace& candiate_space = board[boardIndex(test_x, test_y)];
         if(candiate_space.ship_id != 0 || candiate_space.is_shot){
             return false;
@@ -96,14 +126,11 @@ bool Game::placeShip(uint32_t ship_id, uint32_t length, ShipOrientation orientat
         {
             test_y++;
         }
-        if(test_x >= board_cols || test_y >= board_rows)
-        {
-            return false;
-        }
     }
     for(int idx = 0; idx < length; idx++)
     {
-        board[boardIndex(base_x, base_y)].ship_id = ship_id;
+        uint32_t board_index = boardIndex(base_x, base_y);
+        board[board_index].ship_id = ship_id;
         if(orientation == ShipOrientation::Horizontal)
         {
             base_x++;
@@ -115,6 +142,97 @@ bool Game::placeShip(uint32_t ship_id, uint32_t length, ShipOrientation orientat
     }
     total_ship_spaces += length;
     return true;
+}
+
+bool Game::startGame()
+{
+    if(!compute_stats)
+    {
+        return shots_taken == 0;
+    }
+    for(int idx = 0; idx < board_size; idx++)
+    {
+        BoardSpace& space = board[idx];
+        stats_board[idx].games_played++;
+        if(space.ship_id)
+        {
+            if(stats_board[idx].ship_id_count.count(space.ship_id))
+            {
+                stats_board[idx].ship_id_count[space.ship_id]++;
+            }
+            else
+            {
+                stats_board[idx].ship_id_count.emplace(space.ship_id, 1);
+            }
+        }
+        else
+        {
+            stats_board[idx].empty_count++;
+        }
+        
+    }
+    return shots_taken == 0;
+}
+
+const SpaceStats& Game::getSpaceStats(uint32_t x, uint32_t y)
+{
+    if(x < 0 || x >= board_cols) throw std::out_of_range("x out of bounds");
+    if(y < 0 || y >= board_rows) throw std::out_of_range("y out of bounds");
+    if(!compute_stats) throw std::runtime_error(
+        "Cannot get stats as stats were disabled at game creation");
+    return stats_board[boardIndex(x, y)];
+}
+
+void Game::populateMatchingBoards()
+{
+    last_matching_boards.clear();
+    bool differ;
+    for(auto candidateBoard : session_boards) 
+    {
+        differ = false;
+        for(int idx = 0; idx < board_size; idx++)
+        {
+            if(board[idx].is_shot && (board[idx].ship_id != candidateBoard[idx].ship_id))
+            {
+                differ = true;
+                break;
+            }
+        }
+        if(!differ)
+        {
+            last_matching_boards.push_back(candidateBoard);
+        }
+    }
+}
+
+SpaceStats Game::computeStatsForMatching(uint32_t x, uint32_t y)
+{
+    //maybe just cache the whole array of results?
+    SpaceStats result;
+    if(!last_match_board || board != last_match_board)
+    {
+        populateMatchingBoards();
+    }
+    uint32_t space_id;
+    uint32_t board_idx = boardIndex(x, y);
+    for(auto matchingBoard : last_matching_boards)
+    {
+        space_id = matchingBoard[board_idx].ship_id;
+        if(space_id == 0)
+        {
+            result.empty_count++;
+        }
+        else if(result.ship_id_count.count(space_id) == 0)
+        {
+            result.ship_id_count.emplace(space_id, 1);
+        }
+        else
+        {
+            result.ship_id_count[space_id]++;
+        }
+        result.games_played++;
+    }
+    return result;
 }
 
 std::string Game::boardAsString()

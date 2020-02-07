@@ -1,5 +1,0 @@
-
-class Ship {
-    Ship();
-    ~Ship();
-};
